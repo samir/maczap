@@ -65,6 +65,18 @@ From the bundle the tool collects:
   from the code signature (Q19, Q28);
 * package receipts whose files include the bundle (`pkgutil --file-info`, `pkgutil --pkgs`).
 
+**iPhone/iPad apps on Apple silicon.** The App Store installs them as a wrapper:
+`/Applications/<Name>.app` holds `Wrapper/<Inner>.app` (the iOS bundle, with a flat
+layout: `Info.plist` at its root, extensions in `PlugIns/`), `Wrapper/*Metadata.plist`
+and a `WrappedBundle` symlink to the inner bundle. There is no `Contents/`. The
+identity comes from the inner bundle; the **wrapper** is the app bundle maczap moves
+(a path to the inner bundle resolves to its wrapper). The inner bundle must be a real
+directory inside `Wrapper/` — symlinks are never followed; when there are several,
+`WrappedBundle` picks one. Such an app is marked `ios_app` (wrapper present, or
+`CFBundleSupportedPlatforms` contains `iPhoneOS`). It runs from a copy under
+`$TMPDIR/../X/`, so it is found and quit by bundle id, never by path (measured
+2026-11-15: `NSRunningApplication.terminate` quits it).
+
 ### 3.2 Confidence levels (Q3, Q21)
 
 | Level | Source | Selected by default |
@@ -83,9 +95,9 @@ User level (`~` is the invoking user, never root's home):
 
 ```
 ~/Library/Application Support/<id|name>
-~/Library/Application Scripts/<id>
+~/Library/Application Scripts/<id|container-uuid>
 ~/Library/Caches/<id|name>
-~/Library/Containers/<id>
+~/Library/Containers/<id|uuid>            (uuid: iPhone/iPad apps, see below)
 ~/Library/Daemon Containers/<id>          (report only — owned by system services)
 ~/Library/Group Containers/<group>
 ~/Library/HTTPStorages/<id>[.binarycookies]
@@ -103,6 +115,14 @@ User level (`~` is the invoking user, never root's home):
 $(getconf DARWIN_USER_CACHE_DIR)/<id>
 $(getconf DARWIN_USER_TEMP_DIR)/<id>
 ```
+
+The data containers of iPhone/iPad apps (and of their extensions) are named by a UUID,
+not by the bundle id. For an `ios_app` target only, maczap reads
+`<uuid>/.com.apple.containermanagerd.metadata.plist` (a regular file; symlinks are
+not followed) and matches its `MCMMetadataIdentifier` like any other name; an
+unreadable one is reported as not checked. `~/Library/Application Scripts/<uuid>` with
+the UUID of a matched container goes with it. Mac apps never get UUID containers, so
+their scans read no metadata.
 
 System level (needs root — §5.3):
 

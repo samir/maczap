@@ -124,3 +124,89 @@ fn an_unsigned_app_has_no_team_id_or_groups() {
     assert_eq!(id.team_id, None);
     assert!(id.app_groups.is_empty());
 }
+
+#[test]
+fn reads_a_wrapped_ios_app_from_its_inner_bundle() {
+    let sb = Sandbox::new();
+    let (outer, inner) = common::fake::wrapped_ios_app(
+        &sb.applications,
+        "iMoney",
+        "BetterSpend",
+        "com.foo.BetterSpend",
+        "iMoney",
+    );
+    common::fake::flat_nested_bundle(&inner, "PlugIns/Widget.appex", "com.foo.BetterSpend.Widget");
+
+    let id = AppIdentity::read(&outer, &FakePlatform::default()).unwrap();
+
+    assert_eq!(id.path, outer, "the wrapper is the app: it is what moves");
+    assert_eq!(id.bundle_id, "com.foo.BetterSpend");
+    assert_eq!(id.name, "iMoney");
+    assert_eq!(id.executable.as_deref(), Some("BetterSpend"));
+    assert_eq!(id.nested_ids, vec!["com.foo.BetterSpend.Widget"]);
+    assert!(id.ios_app);
+}
+
+#[test]
+fn a_mac_app_is_not_an_ios_app() {
+    let sb = Sandbox::new();
+    let app = FakeApp::new(&sb.applications, "Bar", "com.foo.Bar").build();
+
+    assert!(
+        !AppIdentity::read(&app, &FakePlatform::default())
+            .unwrap()
+            .ios_app
+    );
+}
+
+#[test]
+fn a_wrapper_whose_link_leaves_the_wrapper_is_not_a_bundle() {
+    let sb = Sandbox::new();
+    let elsewhere = FakeApp::new(&sb.base, "Elsewhere", "com.foo.Elsewhere").build();
+    let outer = sb.applications.join("Trap.app");
+    std::fs::create_dir_all(outer.join("Wrapper")).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, outer.join("WrappedBundle")).unwrap();
+    // Nor does a wrapper whose inner "bundle" is itself a symlink out.
+    let outer2 = sb.applications.join("Trap2.app");
+    std::fs::create_dir_all(outer2.join("Wrapper")).unwrap();
+    let flat = common::fake::flat_nested_bundle(&sb.base, "Flat.app", "com.foo.Flat");
+    std::os::unix::fs::symlink(&flat, outer2.join("Wrapper/Flat.app")).unwrap();
+
+    assert!(matches!(
+        AppIdentity::read(&outer, &FakePlatform::default()),
+        Err(IdentityError::NotABundle(_))
+    ));
+    assert!(matches!(
+        AppIdentity::read(&outer2, &FakePlatform::default()),
+        Err(IdentityError::NotABundle(_))
+    ));
+}
+
+#[test]
+fn the_inner_bundle_is_found_without_the_link_and_the_link_picks_among_several() {
+    let sb = Sandbox::new();
+    let (outer, _) =
+        common::fake::wrapped_ios_app(&sb.applications, "Solo", "Solo", "com.foo.Solo", "Solo");
+    std::fs::remove_file(outer.join("WrappedBundle")).unwrap();
+    // CFBundleSupportedPlatforms is optional: the wrapper alone makes it an iOS app.
+    let info = outer.join("Wrapper/Solo.app/Info.plist");
+    let mut dict = plist::Value::from_file(&info)
+        .unwrap()
+        .into_dictionary()
+        .unwrap();
+    dict.remove("CFBundleSupportedPlatforms");
+    plist::Value::Dictionary(dict).to_file_xml(&info).unwrap();
+
+    let (pair, _) =
+        common::fake::wrapped_ios_app(&sb.applications, "Pair", "Second", "com.foo.Second", "Pair");
+    common::fake::flat_nested_bundle(&pair, "Wrapper/First.app", "com.foo.First");
+    let platform = FakePlatform::default();
+
+    let solo = AppIdentity::read(&outer, &platform).unwrap();
+    assert_eq!(solo.bundle_id, "com.foo.Solo");
+    assert!(solo.ios_app);
+    assert_eq!(
+        AppIdentity::read(&pair, &platform).unwrap().bundle_id,
+        "com.foo.Second"
+    );
+}

@@ -13,10 +13,11 @@ Last updated: 2026-11-15.
 | Real adapters | `tests/mac_platform.rs`: signatures, installed apps, receipts, `launchctl`, `tccutil`, process liveness; graceful quit of Chess (`--ignored`). |
 | Executor (Q8, §4 order) | 8 tests (`tests/uninstall.rs`) with recording fakes; mutation-checked: bundle preflight, TCC-before-move. |
 | Plan, resolve, protection (Q7, Q22) | `tests/plan.rs` (4), `tests/resolve.rs` (6). |
+| iPhone/iPad apps (wrapped bundles, UUID containers) | `tests/identity.rs` (4), `tests/resolve.rs` (1), `tests/discovery.rs` (6), 1 E2E round trip (uninstall → restore). Mutation-checked: symlinked inner bundle, wrapper mapping, iOS-only metadata reads, symlinked metadata, UUID-only names, shared ids, `WrappedBundle` choice. Read-only scans of iMoney, PocketPal and Mibo Smart (6 extension containers) on the author's Mac; scans of Rectangle, iTerm2, 1Password, Excel, Docker unchanged. |
 | CLI | 7 E2E tests of the real binary on a sandbox (`crates/maczap/tests/e2e.rs`), incl. one through an `mz` symlink; 3 unit tests of the root-side selection; 6 TUI tests (state machine + `TestBackend` render); TUI driven once through a real pseudo-terminal. |
 | Release | `dist build` for `aarch64-apple-darwin` and `x86_64-apple-darwin` (both run; x86_64 under Rosetta; ad-hoc signed; test hook absent from release builds). The Homebrew formula and the shell installer add `mz` as a symlink to `maczap` (`bin-aliases`). CI workflow passes locally (`fmt --check`, `clippy -D warnings`, tests). |
 
-Totals: 112 tests pass, 1 ignored locally (launches Chess; runs in CI).
+Totals: 124 tests pass, 1 ignored locally (launches Chess; runs in CI).
 
 ## Open
 

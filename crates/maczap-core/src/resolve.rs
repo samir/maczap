@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use plist::Value;
 
-use crate::identity::{AppIdentity, read_info_plist};
+use crate::identity::{AppIdentity, read_info_plist, wrapper_of};
 use crate::platform::Platform;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,12 +33,14 @@ pub fn resolve(query: &str, platform: &dyn Platform) -> Result<Resolution, Resol
         if read_info_plist(&path).is_err() {
             return Err(ResolveError::NotAnApp(path));
         }
-        return Ok(Resolution::One(path));
+        return Ok(Resolution::One(wrapper_of(&path).unwrap_or(path)));
     }
 
     let apps: Vec<(PathBuf, plist::Dictionary)> = platform
         .installed_apps()
         .into_iter()
+        // The inner bundle of an iOS app wrapper is the wrapper's app, not another one.
+        .map(|p| wrapper_of(&p).unwrap_or(p))
         .filter_map(|p| read_info_plist(&p).ok().map(|info| (p, info)))
         .collect();
     let field = |info: &plist::Dictionary, key: &str| {

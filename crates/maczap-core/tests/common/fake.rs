@@ -148,3 +148,67 @@ impl Platform for FakePlatform {
         self.btm.clone()
     }
 }
+
+/// An iPhone/iPad app as macOS installs it on Apple silicon: `<outer>.app` holds
+/// `Wrapper/<inner>.app` (flat iOS layout, `Info.plist` at its root) and a
+/// `WrappedBundle` symlink to it. Returns (outer, inner).
+pub fn wrapped_ios_app(
+    parent: &Path,
+    outer: &str,
+    inner: &str,
+    bundle_id: &str,
+    display_name: &str,
+) -> (PathBuf, PathBuf) {
+    let outer_path = parent.join(format!("{outer}.app"));
+    let inner_path = outer_path.join(format!("Wrapper/{inner}.app"));
+    let mut info = Dictionary::new();
+    info.insert("CFBundleIdentifier".into(), Value::String(bundle_id.into()));
+    info.insert("CFBundleName".into(), Value::String(inner.into()));
+    info.insert(
+        "CFBundleDisplayName".into(),
+        Value::String(display_name.into()),
+    );
+    info.insert("CFBundleExecutable".into(), Value::String(inner.into()));
+    info.insert("CFBundlePackageType".into(), Value::String("APPL".into()));
+    info.insert(
+        "CFBundleSupportedPlatforms".into(),
+        Value::Array(vec![Value::String("iPhoneOS".into())]),
+    );
+    fs::create_dir_all(&inner_path).unwrap();
+    Value::Dictionary(info)
+        .to_file_xml(inner_path.join("Info.plist"))
+        .unwrap();
+    fs::write(inner_path.join(inner), "bin").unwrap();
+    fs::write(outer_path.join("Wrapper/BundleMetadata.plist"), "x").unwrap();
+    fs::write(outer_path.join("Wrapper/iTunesMetadata.plist"), "x").unwrap();
+    std::os::unix::fs::symlink(
+        format!("Wrapper/{inner}.app"),
+        outer_path.join("WrappedBundle"),
+    )
+    .unwrap();
+    (outer_path, inner_path)
+}
+
+/// A nested bundle in the flat iOS layout (`Info.plist` at its root), e.g. an
+/// extension in `PlugIns/` of an iOS app.
+pub fn flat_nested_bundle(app: &Path, relative: &str, bundle_id: &str) -> PathBuf {
+    let path = app.join(relative);
+    write_plist(
+        &path.join("Info.plist"),
+        &[("CFBundleIdentifier", Value::String(bundle_id.into()))],
+    );
+    path
+}
+
+/// The data container of an iOS app: `~/Library/Containers/<UUID>`, with the owner's
+/// bundle id in its containermanagerd metadata.
+pub fn ios_container(home: &Path, uuid: &str, bundle_id: &str) -> PathBuf {
+    let container = home.join("Library/Containers").join(uuid);
+    write_plist(
+        &container.join(".com.apple.containermanagerd.metadata.plist"),
+        &[("MCMMetadataIdentifier", Value::String(bundle_id.into()))],
+    );
+    fs::create_dir_all(container.join("Data/Documents")).unwrap();
+    fs::write(container.join("Data/Documents/db.sqlite"), "x").unwrap();
+    container
+}

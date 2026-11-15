@@ -591,3 +591,156 @@ fn merging_another_source_keeps_the_strongest_confidence_per_path() {
         1
     );
 }
+
+const UUID_A: &str = "E411BE18-8E0E-4A6B-82EA-7377E741432A";
+const UUID_B: &str = "8BDD2EA5-581C-4864-BF0C-AD5C09FFBF77";
+const UUID_C: &str = "2AEA99C8-B034-4CE2-8373-3C1EAB5395A3";
+const UUID_D: &str = "1A63FC79-6CC5-4B82-97BA-8DA3DAF7EC83";
+
+impl World {
+    fn ios_app(&self) -> PathBuf {
+        let (outer, inner) = common::fake::wrapped_ios_app(
+            &self.sb.applications,
+            "iMoney",
+            "BetterSpend",
+            "com.foo.BetterSpend",
+            "iMoney",
+        );
+        common::fake::flat_nested_bundle(
+            &inner,
+            "PlugIns/Widget.appex",
+            "com.foo.BetterSpend.Widget",
+        );
+        outer
+    }
+}
+
+#[test]
+fn ios_app_containers_named_by_uuid_match_on_their_metadata() {
+    let w = World::new();
+    let app = w.ios_app();
+    let own = common::fake::ios_container(&w.sb.home, UUID_A, "com.foo.BetterSpend");
+    let widget = common::fake::ios_container(&w.sb.home, UUID_B, "com.foo.BetterSpend.Widget");
+    let other = common::fake::ios_container(&w.sb.home, UUID_C, "com.other.App");
+    let no_metadata = w
+        .touch(&w.user(&format!("Containers/{UUID_D}/x")))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    // Application Scripts uses the UUID of the container it belongs to.
+    let scripts = w.user(&format!("Application Scripts/{UUID_A}"));
+    std::fs::create_dir_all(&scripts).unwrap();
+    let other_scripts = w.user(&format!("Application Scripts/{UUID_C}"));
+    std::fs::create_dir_all(&other_scripts).unwrap();
+
+    let scan = w.scan(&app);
+
+    let bundle = find(&scan, &app).unwrap();
+    assert_eq!(bundle.category, Category::AppBundle);
+    for path in [&own, &widget] {
+        let c = find(&scan, path).unwrap_or_else(|| panic!("{} not found", path.display()));
+        assert_eq!(c.category, Category::Containers);
+        assert_eq!(c.confidence, Confidence::High);
+        assert!(c.reason.contains("UUID"), "{}", c.reason);
+    }
+    let s = find(&scan, &scripts).unwrap();
+    assert_eq!(s.category, Category::ApplicationScripts);
+    assert_eq!(s.confidence, Confidence::High);
+    for path in [&other, &no_metadata, &other_scripts] {
+        assert!(find(&scan, path).is_none(), "{} matched", path.display());
+    }
+    assert!(scan.not_checked.is_empty());
+}
+
+#[test]
+fn uuid_containers_are_shared_when_another_installed_copy_has_the_id() {
+    let mut w = World::new();
+    let app = w.ios_app();
+    let copy = FakeApp::new(
+        &w.sb.home.join("Applications"),
+        "BetterSpend",
+        "com.foo.BetterSpend",
+    )
+    .build();
+    w.platform.installed = vec![app.clone(), copy];
+    let own = common::fake::ios_container(&w.sb.home, UUID_A, "com.foo.BetterSpend");
+
+    let scan = w.scan(&app);
+
+    assert_eq!(find(&scan, &own).unwrap().confidence, Confidence::Shared);
+}
+
+#[test]
+fn uuid_containers_are_not_read_for_mac_apps() {
+    let w = World::new();
+    let app = w.app();
+    let container = common::fake::ios_container(&w.sb.home, UUID_A, "com.foo.Bar");
+
+    let scan = w.scan(&app);
+
+    assert!(find(&scan, &container).is_none());
+}
+
+#[test]
+fn unreadable_container_metadata_is_reported_as_not_checked() {
+    use std::os::unix::fs::PermissionsExt;
+    let w = World::new();
+    let app = w.ios_app();
+    let container = common::fake::ios_container(&w.sb.home, UUID_A, "com.foo.BetterSpend");
+    let metadata = container.join(".com.apple.containermanagerd.metadata.plist");
+    std::fs::set_permissions(&metadata, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let scan = w.scan(&app);
+    std::fs::set_permissions(&metadata, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    assert!(find(&scan, &container).is_none());
+    assert_eq!(scan.not_checked.len(), 1);
+    assert_eq!(scan.not_checked[0].path, metadata);
+}
+
+#[test]
+fn every_candidate_of_an_ios_app_scan_passes_the_guard() {
+    use maczap_core::guard::Guard;
+    let w = World::new();
+    let app = w.ios_app();
+    common::fake::ios_container(&w.sb.home, UUID_A, "com.foo.BetterSpend");
+    std::fs::create_dir_all(w.user(&format!("Application Scripts/{UUID_A}"))).unwrap();
+    let guard = Guard::new(
+        w.catalog
+            .roots(std::slice::from_ref(&w.sb.quarantine))
+            .unwrap(),
+    );
+
+    let scan = w.scan(&app);
+
+    assert_eq!(scan.candidates.len(), 3, "{:#?}", scan.candidates);
+    for c in scan.candidates {
+        let path = c.path.clone();
+        guard
+            .verify(c)
+            .unwrap_or_else(|r| panic!("{}: {r}", path.display()));
+    }
+}
+
+#[test]
+fn only_uuid_named_containers_with_real_metadata_files_are_read() {
+    let w = World::new();
+    let app = w.ios_app();
+    // Named like another app, but its metadata claims ours: the name wins.
+    let misnamed = common::fake::ios_container(&w.sb.home, "com.other.App", "com.foo.BetterSpend");
+    // Metadata that is a symlink to a plist naming our id is not followed.
+    let elsewhere = common::fake::ios_container(&w.sb.base, UUID_D, "com.foo.BetterSpend");
+    let linked = w.user(&format!("Containers/{UUID_A}"));
+    std::fs::create_dir_all(&linked).unwrap();
+    std::os::unix::fs::symlink(
+        elsewhere.join(".com.apple.containermanagerd.metadata.plist"),
+        linked.join(".com.apple.containermanagerd.metadata.plist"),
+    )
+    .unwrap();
+
+    let scan = w.scan(&app);
+
+    assert!(find(&scan, &misnamed).is_none());
+    assert!(find(&scan, &linked).is_none());
+    assert!(scan.not_checked.is_empty());
+}

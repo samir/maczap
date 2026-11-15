@@ -264,3 +264,77 @@ fn the_mz_alias_is_the_same_command_under_a_shorter_name() {
     );
     assert_eq!(json(&via_alias), json(&via_name));
 }
+
+/// An iPhone/iPad app as macOS installs it on Apple silicon: a wrapper `.app` with
+/// the real bundle in `Wrapper/` (flat iOS layout) and a `WrappedBundle` symlink, and
+/// a data container named by a UUID. Returns (wrapper, container, scripts).
+fn ios_app(m: &Machine) -> (PathBuf, PathBuf, PathBuf) {
+    let id = format!("{}.ios", m.id);
+    let outer = m
+        .root
+        .join(format!("Applications/iOS{}.app", m.id.replace('.', "")));
+    let inner = outer.join("Wrapper/Inner.app");
+    let mut info = Dictionary::new();
+    info.insert("CFBundleIdentifier".into(), Value::String(id.clone()));
+    info.insert("CFBundleName".into(), Value::String("Inner".into()));
+    info.insert(
+        "CFBundleSupportedPlatforms".into(),
+        Value::Array(vec![Value::String("iPhoneOS".into())]),
+    );
+    fs::create_dir_all(&inner).unwrap();
+    Value::Dictionary(info)
+        .to_file_xml(inner.join("Info.plist"))
+        .unwrap();
+    m.file(&outer.join("Wrapper/iTunesMetadata.plist"));
+    std::os::unix::fs::symlink("Wrapper/Inner.app", outer.join("WrappedBundle")).unwrap();
+
+    let uuid = "E411BE18-8E0E-4A6B-82EA-7377E741432A";
+    let container = m.home.join("Library/Containers").join(uuid);
+    let mut metadata = Dictionary::new();
+    metadata.insert("MCMMetadataIdentifier".into(), Value::String(id));
+    fs::create_dir_all(&container).unwrap();
+    Value::Dictionary(metadata)
+        .to_file_xml(container.join(".com.apple.containermanagerd.metadata.plist"))
+        .unwrap();
+    m.file(&container.join("Data/Documents/db.sqlite"));
+    let scripts = m.home.join("Library/Application Scripts").join(uuid);
+    fs::create_dir_all(&scripts).unwrap();
+    (outer, container, scripts)
+}
+
+#[test]
+fn an_ios_app_and_its_uuid_container_round_trip_through_the_quarantine() {
+    let m = Machine::new();
+    let (app, container, scripts) = ios_app(&m);
+
+    let out = m.run(&["uninstall", app.to_str().unwrap(), "--yes", "--json"]);
+
+    assert_eq!(code(&out), 0, "{}", String::from_utf8_lossy(&out.stderr));
+    let body = json(&out);
+    assert_eq!(body["complete"], true);
+    assert_eq!(body["moved"], 3, "{body:#}");
+    assert!(!app.exists() && !container.exists() && !scripts.exists());
+
+    let batch = body["batch"].as_str().unwrap().to_string();
+    let restored = m.run(&["restore", &batch]);
+
+    assert_eq!(
+        code(&restored),
+        0,
+        "{}",
+        String::from_utf8_lossy(&restored.stdout)
+    );
+    assert!(container.join("Data/Documents/db.sqlite").exists() && scripts.exists());
+    assert_eq!(
+        fs::read_link(app.join("WrappedBundle")).unwrap(),
+        Path::new("Wrapper/Inner.app")
+    );
+    let again = m.run(&["scan", app.to_str().unwrap(), "--json"]);
+    assert_eq!(
+        code(&again),
+        0,
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(json(&again)["app"]["ios_app"], true);
+}

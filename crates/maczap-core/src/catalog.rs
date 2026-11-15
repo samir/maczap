@@ -15,6 +15,11 @@ pub enum Rule {
     ByIdOrName,
     /// App group containers (`<TEAMID>.<group>`, `group.<…>`).
     GroupContainers,
+    /// Data containers: `ById`, plus (iPhone/iPad apps) containers named by a UUID
+    /// whose containermanagerd metadata names the app's bundle id.
+    Containers,
+    /// `ById`, plus folders named by the UUID of one of the app's data containers.
+    ApplicationScripts,
     /// launchd job plists, matched on their contents.
     Launchd,
     /// Privileged helper tools, matched by name or by a matched launchd job.
@@ -101,11 +106,16 @@ impl Catalog {
         add(
             user("Application Scripts"),
             Scope::User,
-            ApplicationScripts,
-            ById,
+            Category::ApplicationScripts,
+            Rule::ApplicationScripts,
         );
         add(user("Caches"), Scope::User, Caches, ByIdOrName);
-        add(user("Containers"), Scope::User, Containers, ById);
+        add(
+            user("Containers"),
+            Scope::User,
+            Category::Containers,
+            Rule::Containers,
+        );
         add(
             user("Group Containers"),
             Scope::User,
@@ -134,7 +144,7 @@ impl Catalog {
         add(
             user("Daemon Containers"),
             Scope::User,
-            Containers,
+            Category::Containers,
             ReportOnly,
         );
         for dir in PLUGIN_DIRS {

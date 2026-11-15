@@ -65,6 +65,9 @@ const EXACT_SUFFIXES: &[&str] = &[
 
 const CRASH_SUFFIXES: &[&str] = &[".ips", ".crash", ".diag", ".spin", ".hang"];
 
+/// Written by containermanagerd at the root of every data container.
+const CONTAINER_METADATA: &str = ".com.apple.containermanagerd.metadata.plist";
+
 pub fn scan(identity: &AppIdentity, catalog: &Catalog, platform: &dyn Platform) -> Scan {
     let ctx = Context::new(identity, platform);
     let mut found = Found::default();
@@ -81,6 +84,7 @@ pub fn scan(identity: &AppIdentity, catalog: &Catalog, platform: &dyn Platform) 
     let mut not_checked = Vec::new();
     let mut report_only = Vec::new();
     let mut helper_programs = Vec::new();
+    let uuid_containers = ctx.uuid_containers(catalog, &mut not_checked);
     for location in &catalog.locations {
         let entries = match list_dir(&location.path) {
             Ok(Some(entries)) => entries,
@@ -104,6 +108,23 @@ pub fn scan(identity: &AppIdentity, catalog: &Catalog, platform: &dyn Platform) 
                     }
                 }
                 Rule::GroupContainers => ctx.group_container(location, &name, &path, &mut found),
+                Rule::Containers | Rule::ApplicationScripts => {
+                    if !ctx.by_id(location, &name, &path, &mut found)
+                        && let Some((confidence, id)) = uuid_containers.get(&name)
+                    {
+                        let reason = if location.rule == Rule::Containers {
+                            format!("data container of bundle id `{id}` (named by a UUID)")
+                        } else {
+                            format!("named by the UUID of the data container of bundle id `{id}`")
+                        };
+                        found.add(Candidate {
+                            path,
+                            category: location.category,
+                            confidence: *confidence,
+                            reason,
+                        });
+                    }
+                }
                 Rule::Launchd => {
                     if let Some(program) = ctx.launchd(location, &name, &path, &mut found) {
                         helper_programs.push(program);
@@ -333,6 +354,47 @@ impl<'a> Context<'a> {
             other_names,
             platform,
         }
+    }
+
+    /// UUID → (confidence, bundle id) of the app's data containers named by a UUID,
+    /// which macOS uses for iPhone/iPad apps. Their metadata names the owner; one that
+    /// cannot be read is not known to be clean. Mac apps' containers are named after
+    /// their bundle id, so for them nothing is read.
+    fn uuid_containers(
+        &self,
+        catalog: &Catalog,
+        not_checked: &mut Vec<NotChecked>,
+    ) -> HashMap<String, (Confidence, String)> {
+        let mut owned = HashMap::new();
+        if !self.identity.ios_app {
+            return owned;
+        }
+        let dirs = catalog
+            .locations
+            .iter()
+            .filter(|l| l.rule == Rule::Containers);
+        for location in dirs {
+            // An unreadable location is reported by the main walk.
+            let Ok(Some(entries)) = list_dir(&location.path) else {
+                continue;
+            };
+            for (name, path) in entries.into_iter().filter(|(n, _)| is_uuid(n)) {
+                let metadata = path.join(CONTAINER_METADATA);
+                match container_owner(&metadata) {
+                    Ok(Some(id)) => {
+                        if let Some((confidence, _)) = self.classify(&id) {
+                            owned.insert(name, (confidence, id));
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => not_checked.push(NotChecked {
+                        path: metadata,
+                        error,
+                    }),
+                }
+            }
+        }
+        owned
     }
 
     /// Does `name` belong to one of the app's ids? Returns the confidence and reason.
@@ -582,6 +644,24 @@ impl<'a> Context<'a> {
     }
 }
 
+/// The bundle id in a container's metadata. `Ok(None)` when there is no metadata (or
+/// it is not a regular file: symlinks are not followed).
+fn container_owner(metadata: &Path) -> Result<Option<String>, String> {
+    match fs::symlink_metadata(metadata) {
+        Ok(m) if m.is_file() => {}
+        Ok(_) => return Ok(None),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    }
+    let file = fs::File::open(metadata).map_err(|e| e.to_string())?;
+    let value = Value::from_reader(io::BufReader::new(file)).map_err(|e| e.to_string())?;
+    Ok(value
+        .as_dictionary()
+        .and_then(|d| d.get("MCMMetadataIdentifier"))
+        .and_then(Value::as_string)
+        .map(str::to_string))
+}
+
 /// `<id>.<suffix>` with a known suffix, or a ByHost preference `<id>.<UUID>.plist`.
 fn is_exact_with_suffix(name: &str, id: &str) -> bool {
     let Some(rest) = strip_prefix_ci(name, id).and_then(|r| r.strip_prefix('.')) else {
@@ -590,7 +670,7 @@ fn is_exact_with_suffix(name: &str, id: &str) -> bool {
     if EXACT_SUFFIXES.iter().any(|s| rest.eq_ignore_ascii_case(s)) {
         return true;
     }
-    rest.strip_suffix(".plist").is_some_and(is_hardware_uuid)
+    rest.strip_suffix(".plist").is_some_and(is_uuid)
 }
 
 /// For `<id>.<more>` (not a known suffix), the sub-id `<id>.<more>` without a known
@@ -617,8 +697,9 @@ fn strip_prefix_ci<'n>(name: &'n str, prefix: &str) -> Option<&'n str> {
     .then(|| &name[prefix.len()..])
 }
 
-/// `XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX` (the hardware UUID in ByHost file names).
-fn is_hardware_uuid(s: &str) -> bool {
+/// `XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX` (the hardware UUID in ByHost file names,
+/// the names of iPhone/iPad apps' data containers).
+fn is_uuid(s: &str) -> bool {
     let groups: Vec<&str> = s.split('-').collect();
     groups.len() == 5
         && groups

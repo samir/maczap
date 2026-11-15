@@ -105,3 +105,34 @@ fn apps_with_mdm_managed_preferences_are_refused() {
     let refusal = protection(&identity, &sb.base).unwrap_err();
     assert!(refusal.to_string().contains("managed"), "{refusal}");
 }
+
+#[test]
+fn a_wrapped_ios_app_resolves_to_its_wrapper_by_path_id_or_name() {
+    let sb = Sandbox::new();
+    let (outer, inner) = common::fake::wrapped_ios_app(
+        &sb.applications,
+        "iMoney",
+        "BetterSpend",
+        "com.foo.BetterSpend",
+        "iMoney",
+    );
+    // Some sources (a directory walk, Spotlight) may list the inner bundle too.
+    let platform = FakePlatform {
+        installed: vec![outer.clone(), inner.clone()],
+        ..Default::default()
+    };
+
+    for query in [
+        outer.to_str().unwrap(),
+        inner.to_str().unwrap(),
+        "com.foo.betterspend",
+        "iMoney",
+        "BetterSpend",
+    ] {
+        assert_eq!(
+            resolve(query, &platform).unwrap(),
+            Resolution::One(outer.clone()),
+            "{query}"
+        );
+    }
+}

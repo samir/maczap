@@ -66,6 +66,10 @@ maczap can see other apps' containers; locations it cannot read are reported as
 `<app>` is a name, a path to the `.app`, or a bundle id. If several apps match,
 maczap asks — and with `--yes` it refuses rather than guess.
 
+iPhone and iPad apps installed from the App Store on a Mac with Apple silicon work
+too: maczap reads the real bundle inside the `.app` wrapper and finds their data
+containers, which macOS names by a UUID instead of the bundle id.
+
 Exit codes: `0` success, `1` error, `2` partial (some items failed), `3` aborted
 (nothing changed).
 
