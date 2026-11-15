@@ -84,7 +84,11 @@ impl Machine {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_maczap"))
+        self.run_as(Path::new(env!("CARGO_BIN_EXE_maczap")), args)
+    }
+
+    fn run_as(&self, exe: &Path, args: &[&str]) -> Output {
+        Command::new(exe)
             .args(args)
             .env("HOME", &self.home)
             .env("MACZAP_SYSTEM_ROOT", &self.root)
@@ -235,4 +239,28 @@ fn apple_apps_are_refused_and_unknown_apps_are_errors() {
     assert_eq!(code(&refused), 3);
     assert!(apple.exists());
     assert_eq!(code(&unknown), 1);
+}
+
+#[test]
+fn the_mz_alias_is_the_same_command_under_a_shorter_name() {
+    // The installers add `mz` as a symlink to `maczap` (dist-workspace.toml).
+    let m = Machine::new();
+    m.traces();
+    let mz = m.root.join("bin/mz");
+    fs::create_dir_all(mz.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_maczap"), &mz).unwrap();
+
+    let help = m.run_as(&mz, &["--help"]);
+    let via_alias = m.run_as(&mz, &["scan", m.app_arg(), "--json"]);
+    let via_name = m.run(&["scan", m.app_arg(), "--json"]);
+
+    assert_eq!(code(&help), 0);
+    assert!(String::from_utf8_lossy(&help.stdout).contains("Usage: mz <COMMAND>"));
+    assert_eq!(
+        code(&via_alias),
+        0,
+        "{}",
+        String::from_utf8_lossy(&via_alias.stderr)
+    );
+    assert_eq!(json(&via_alias), json(&via_name));
 }

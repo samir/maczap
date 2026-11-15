@@ -21,3 +21,5 @@ install-updater = false
 tap = "samir/homebrew-tap"
 # Publish jobs to run in CI
 publish-jobs = ["homebrew"]
+# Extra names for the binaries: the installers add `mz` as a symlink to `maczap`
+bin-aliases = { maczap = ["mz"] }

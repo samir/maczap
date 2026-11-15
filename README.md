@@ -44,6 +44,10 @@ $ brew install samir/tap/maczap
 
 or `cargo install maczap`. Requires macOS 13 or later.
 
+`mz` is a short alias: `mz scan Rectangle` is `maczap scan Rectangle`. Homebrew and
+the shell installer add it as a symlink. `cargo install` cannot, so add it yourself:
+`ln -s maczap ~/.cargo/bin/mz`.
+
 Give your terminal **Full Disk Access** (System Settings › Privacy & Security) so
 maczap can see other apps' containers; locations it cannot read are reported as
 *not checked*, never as clean. `maczap doctor` tells you what is missing.
@@ -74,9 +78,11 @@ Exit codes: `0` success, `1` error, `2` partial (some items failed), `3` aborted
 ## Development
 
 ```console
-$ cargo test --workspace                 # unit, integration, contract and E2E tests
-$ cargo test -p maczap-core --test mac_platform -- --ignored   # launches and quits Chess
-$ scripts/privileged-smoke.sh            # real sudo round trip (asks for your password)
+$ make            # list every command
+$ make ci         # format check, clippy -D warnings, all tests (what CI runs)
+$ make test-contract   # contract tests on this Mac, incl. one that launches Chess
+$ make smoke      # real sudo round trip (asks for your password)
+$ make dist-build # release archives for Apple Silicon and Intel
 ```
 
 Design: [docs/DESIGN.md](docs/DESIGN.md) · decisions: [docs/adr](docs/adr) ·
