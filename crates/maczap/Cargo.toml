@@ -1,0 +1,30 @@
+[package]
+name = "maczap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Uninstall macOS apps completely and safely, with a real undo"
+homepage = "https://github.com/samir/maczap"
+readme = "../../README.md"
+keywords = ["macos", "uninstall", "cli", "cleanup"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive", "wrap_help"] }
+jiff = "0.2.44"
+maczap-core = { version = "0.1.0", path = "../maczap-core" }
+plist = "1.8.0"
+ratatui = "0.29.0"
+rustix = { version = "1.1.6", features = ["fs", "process"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+plist = "1.8.0"
+serde_json = "1.0.154"
+tempfile = "3.27.0"

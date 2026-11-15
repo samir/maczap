@@ -1,0 +1,7 @@
+target/
+**/target/
+.claude/settings.local.json
+.claude/tmp/
+.claude/cache/
+CLAUDE.local.md
+
