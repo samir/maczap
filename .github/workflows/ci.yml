@@ -14,14 +14,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # DESIGN §9: CI on macOS 14 and 15 (Apple Silicon runners).
-        os: [macos-14, macos-15]
+        # DESIGN §9: CI on macOS 15 and 26 (Apple Silicon runners).
+        os: [macos-15, macos-26]
     runs-on: ${{ matrix.os }}
     env:
       CARGO_TERM_COLOR: always
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # rust-toolchain.toml pins the toolchain, components and targets.
       - name: Install the pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install

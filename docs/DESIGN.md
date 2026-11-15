@@ -325,7 +325,7 @@ CLI modules: `env`, `commands`, `batches`, `doctor`, `privileged`, `homebrew`, `
    `.app` bundles (Info.plist, nested helpers, fake receipts, fake launchd plists).
 2. Dedicated tests for every guard rule: symlink escape, root/ancestor, deny-list,
    inode swap between scan and move.
-3. CI: GitHub Actions on macOS 14 and 15.
+3. CI: GitHub Actions on macOS 15 and 26 (the macOS 14 runner image is retired).
 4. End-to-end tests with real apps (install → uninstall → restore) run only in a
    disposable `tart` VM, never on a developer machine.
 
